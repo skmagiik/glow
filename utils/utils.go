@@ -2,23 +2,127 @@
 package utils
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mitchellh/go-homedir"
+
+	"gopkg.in/yaml.v3"
 )
+
+func scalarToString(v interface{}) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return fmt.Sprintf("%v", t)
+	default:
+		// Fallback to YAML-marshaled string for complex types
+		b, err := yaml.Marshal(t)
+		if err != nil {
+			return fmt.Sprintf("%v", t)
+		}
+		return strings.TrimSpace(string(b))
+	}
+}
 
 // RemoveFrontmatter removes the front matter header of a markdown file.
 func RemoveFrontmatter(content []byte) []byte {
 	if frontmatterBoundaries := detectFrontmatter(content); frontmatterBoundaries[0] == 0 {
 		return content[frontmatterBoundaries[1]:]
 	}
+	return content
+}
+
+// extractFrontmatterVars reads YAML frontmatter (if present) and returns a flattened map plus the bounds.
+func extractFrontmatterVars(content []byte) (map[string]string, []int) {
+	fmBounds := detectFrontmatter(content)
+	vars := make(map[string]string)
+
+	if fmBounds[0] == 0 && fmBounds[1] > fmBounds[0] {
+		fmBytes := content[fmBounds[0]:fmBounds[1]]
+		// strip the leading and trailing '---' lines
+		trim := bytes.TrimPrefix(fmBytes, []byte("---"))
+		trim = bytes.TrimSuffix(trim, []byte("---"))
+		trim = bytes.TrimSpace(trim)
+
+		var raw map[string]interface{}
+		if err := yaml.Unmarshal(trim, &raw); err == nil {
+			flattenYAML("", raw, vars)
+		}
+	}
+
+	return vars, fmBounds
+}
+
+func flattenYAML(prefix string, in interface{}, out map[string]string) {
+	key := func(k string) string {
+		if prefix == "" {
+			return k
+		}
+		return prefix + "." + k
+	}
+
+	switch v := in.(type) {
+	case map[string]interface{}:
+		for k, vv := range v {
+			flattenYAML(key(k), vv, out)
+		}
+	case []interface{}:
+		var parts []string
+		for _, item := range v {
+			parts = append(parts, scalarToString(item))
+		}
+		out[prefix] = strings.Join(parts, ", ")
+	default:
+		out[prefix] = scalarToString(v)
+	}
+}
+
+// PreprocessDynamicText replaces some contents of the markdown file with dynamically generated contents.
+func PreprocessDynamicText(content []byte) []byte {
+
+	vars, _ := extractFrontmatterVars(content)
+	content = RemoveFrontmatter(content)
+
+	// Built-ins (non-variable defined vars)
+	now := time.Now()
+	vars["date"] = now.Format("2006-01-02")
+	vars["datetime"] = now.Format(time.RFC3339)
+	vars["time"] = now.Format("15:04:05")
+	cwd, err := os.Getwd()
+	if err == nil {
+		vars["pwd"] = cwd
+		pwd_short := filepath.Base(cwd)
+		if pwd_short == string(filepath.Separator) || pwd_short == "." {
+			pwd_short = cwd // fallback to full path
+		}
+		vars["pwd_short"] = pwd_short
+	}
+
+	for k, v := range vars {
+		re := regexp.MustCompile(`\{\{\s*` + regexp.QuoteMeta(k) + `\s*\}\}`)
+		content = re.ReplaceAll(content, []byte(v))
+	}
+
 	return content
 }
 

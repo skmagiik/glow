@@ -276,7 +276,7 @@ func executeCLI(cmd *cobra.Command, src *source, w io.Writer) error {
 		return fmt.Errorf("unable to read from reader: %w", err)
 	}
 
-	b = utils.RemoveFrontmatter(b)
+	b = utils.PreprocessDynamicText(b)
 
 	// render
 	var baseURL string
