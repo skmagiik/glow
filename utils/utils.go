@@ -105,17 +105,34 @@ func PreprocessDynamicText(content []byte) []byte {
 
 	// Built-ins (non-variable defined vars)
 	now := time.Now()
-	vars["date"] = now.Format("2006-01-02")
-	vars["datetime"] = now.Format(time.RFC3339)
-	vars["time"] = now.Format("15:04:05")
+	vars["datetime_rfc3339"] = now.Format(time.RFC3339)
+	vars["datetime_rfc1123"] = now.Format(time.RFC1123)
+	vars["datetime"] = now.Format("2006-01-02 15:04")
+	vars["datetime_iso"] = now.Format("2006-01-02 15:04:05")
+	vars["date_short"] = now.Format("2006-01-02")
+	vars["date_long"] = now.Format("Jan 02, 2006")
+	vars["date_full"] = now.Format("Monday, 02 Jan 2006")
+	vars["custom_date"] = now.Format(vars["custom_date_fmt"]) // user custom_date_fmt var to format the date string
+	vars["date"] = vars["date_short"]
+
+	vars["time_12h"] = now.Format("03:04 PM")
+	vars["time_24h"] = now.Format("15:04")
+	vars["time_long"] = now.Format("15:04:05")
+	vars["time"] = vars["time_24h"]
+	vars["tz_short"] = now.Format("MST")
+	vars["tz_offset"] = now.Format("-7:00")
+	vars["tz"] = vars["tz_short"]
+
 	cwd, err := os.Getwd()
 	if err == nil {
 		vars["pwd"] = cwd
-		pwd_short := filepath.Base(cwd)
-		if pwd_short == string(filepath.Separator) || pwd_short == "." {
-			pwd_short = cwd // fallback to full path
+		vars["cwd"] = cwd
+		cwd_short := filepath.Base(cwd)
+		if cwd_short == string(filepath.Separator) || cwd_short == "." {
+			cwd_short = cwd // fallback to full path
 		}
-		vars["pwd_short"] = pwd_short
+		vars["pwd_short"] = cwd_short
+		vars["cwd_short"] = cwd_short
 	}
 
 	for k, v := range vars {
