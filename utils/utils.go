@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -98,13 +99,15 @@ func flattenYAML(prefix string, in interface{}, out map[string]string) {
 }
 
 // PreprocessDynamicText replaces some contents of the markdown file with dynamically generated contents.
-func PreprocessDynamicText(content []byte) []byte {
+func PreprocessDynamicText(content []byte, currentDir string) []byte {
 
 	vars, _ := extractFrontmatterVars(content)
 	content = RemoveFrontmatter(content)
 
 	// Built-ins (non-variable defined vars)
 	now := time.Now()
+	hour := now.Hour()
+
 	vars["datetime_rfc3339"] = now.Format(time.RFC3339)
 	vars["datetime_rfc1123"] = now.Format(time.RFC1123)
 	vars["datetime"] = now.Format("2006-01-02 15:04")
@@ -123,6 +126,17 @@ func PreprocessDynamicText(content []byte) []byte {
 	vars["tz_offset"] = now.Format("-7:00")
 	vars["tz"] = vars["tz_short"]
 
+	if hour >= 5 && hour < 12 {
+		vars["timeofday"] = "morning"
+		vars["timeofday_emoji"] = "☕"
+	} else if hour >= 12 && hour < 17 {
+		vars["timeofday"] = "afternoon"
+		vars["timeofday_emoji"] = "☀️"
+	} else {
+		vars["timeofday"] = "evening"
+		vars["timeofday_emoji"] = "🌙"
+	}
+
 	cwd, err := os.Getwd()
 	if err == nil {
 		vars["pwd"] = cwd
@@ -135,10 +149,48 @@ func PreprocessDynamicText(content []byte) []byte {
 		vars["cwd_short"] = cwd_short
 	}
 
+	curuser, err := user.Current()
+
+	if err == nil {
+		vars["user"] = curuser.Username
+	}
+
 	for k, v := range vars {
 		re := regexp.MustCompile(`\{\{\s*` + regexp.QuoteMeta(k) + `\s*\}\}`)
 		content = re.ReplaceAll(content, []byte(v))
 	}
+
+	// Find all cases of {{inject[filepath]}}
+	// Open the file if filepath exists
+	// Render the contents by preprocessing (recursive)
+	// Replace the contents of the inject with those contents
+	// Second pass: handle {{inject[filepath]}}
+	injectRegex := regexp.MustCompile(`\{\{\s*inject\[(.*?)\]\s*\}\}`)
+	content = injectRegex.ReplaceAllFunc(content, func(match []byte) []byte {
+		// Extract the filepath from the match
+		submatch := injectRegex.FindSubmatch(match)
+		if len(submatch) < 2 {
+			return []byte("") // Return an empty string if filepath is not found
+		}
+		relPath := string(submatch[1])
+		var absPath string
+		if filepath.IsAbs(relPath) {
+			absPath = relPath
+		} else {
+			absPath = filepath.Join(currentDir, relPath)
+		}
+
+		// Read the file content
+		injectedContent, err := os.ReadFile(absPath)
+		if err != nil {
+			return []byte(fmt.Sprintf("{{inject_error: %s}}", err)) // Indicate error
+		}
+
+		// Recursively preprocess the injected content
+		// We pass the directory of the injected file for correct relative path resolution
+		injectedDir := filepath.Dir(absPath)
+		return PreprocessDynamicText(injectedContent, injectedDir)
+	})
 
 	return content
 }

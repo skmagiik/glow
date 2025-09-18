@@ -276,7 +276,12 @@ func executeCLI(cmd *cobra.Command, src *source, w io.Writer) error {
 		return fmt.Errorf("unable to read from reader: %w", err)
 	}
 
-	b = utils.PreprocessDynamicText(b)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	b = utils.PreprocessDynamicText(b, cwd)
 
 	// render
 	var baseURL string
