@@ -281,7 +281,20 @@ func executeCLI(cmd *cobra.Command, src *source, w io.Writer) error {
 		return err
 	}
 
-	b = utils.PreprocessDynamicText(b, cwd)
+	processedPaths := make(map[string]bool)
+	// src.URL will be empty when reading from stdin.
+	if src.URL != "" {
+		initialFilePath, err := filepath.Abs(src.URL)
+		if err != nil {
+			return err
+		}
+		processedPaths[initialFilePath] = true
+
+		// Use the directory of the initial file as the current directory
+		cwd = filepath.Dir(initialFilePath)
+	}
+
+	b = utils.PreprocessDynamicText(b, cwd, processedPaths)
 
 	// render
 	var baseURL string

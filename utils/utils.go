@@ -4,6 +4,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -99,10 +100,11 @@ func flattenYAML(prefix string, in interface{}, out map[string]string) {
 }
 
 // PreprocessDynamicText replaces some contents of the markdown file with dynamically generated contents.
-func PreprocessDynamicText(content []byte, currentDir string) []byte {
+func PreprocessDynamicText(content []byte, currentDir string, processedPaths map[string]bool) []byte {
 
 	vars, _ := extractFrontmatterVars(content)
 	content = RemoveFrontmatter(content)
+	//fmt.Println("Processed Paths:", processedPaths) // Debug print out the processed paths for recursion validation
 
 	// Built-ins (non-variable defined vars)
 	now := time.Now()
@@ -180,16 +182,27 @@ func PreprocessDynamicText(content []byte, currentDir string) []byte {
 			absPath = filepath.Join(currentDir, relPath)
 		}
 
+		if processedPaths[absPath] {
+			//fmt.Println("Recursive file injection detected: %s. Skipping.", relPath)
+			//fmt.Println("Processed Paths:", processedPaths) // Debug print out the processed paths for recursion validation
+			return []byte(fmt.Sprintf("`{{inject_recursion_error: %s -> %s}}`", relPath, processedPaths))
+		}
+
 		// Read the file content
 		injectedContent, err := os.ReadFile(absPath)
 		if err != nil {
 			return []byte(fmt.Sprintf("{{inject_error: %s}}", err)) // Indicate error
 		}
 
+		// Add the new path to the map for the recursive call
+		newProcessedPaths := make(map[string]bool)
+		maps.Copy(newProcessedPaths, processedPaths)
+		newProcessedPaths[absPath] = true
+
 		// Recursively preprocess the injected content
 		// We pass the directory of the injected file for correct relative path resolution
 		injectedDir := filepath.Dir(absPath)
-		return PreprocessDynamicText(injectedContent, injectedDir)
+		return PreprocessDynamicText(injectedContent, injectedDir, newProcessedPaths)
 	})
 
 	return content
